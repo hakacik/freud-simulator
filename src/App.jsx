@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import './App.css'
 
 // ─── API Config ───────────────────────────────────────────────────────────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
+const MODEL_NAME = 'gemini-1.5-flash'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -138,31 +139,26 @@ Aşağıdaki formatta, akademik ama destekleyici bir dille Türkçe süpervizyon
 - [APA 7. baskı formatında kaynak 3]`
 }
 
-// ─── API Caller ───────────────────────────────────────────────────────────────
+// ─── API Caller (Official SDK) ───────────────────────────────────────────────
 
 async function callGemini(systemPrompt, apiMessages, options = {}) {
   if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
     throw new Error('VITE_GEMINI_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Gemini API anahtarı ekleyin.')
   }
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: apiMessages,
-      generationConfig: {
-        temperature: options.temperature ?? 0.85,
-        topP: 0.95,
-        maxOutputTokens: options.maxTokens ?? 1024,
-      }
-    })
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+  const model = genAI.getGenerativeModel({
+    model: MODEL_NAME,
+    systemInstruction: systemPrompt,
+    generationConfig: {
+      temperature: options.temperature ?? 0.85,
+      topP: 0.95,
+      maxOutputTokens: options.maxTokens ?? 1024,
+    }
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message || `API Hatası: ${res.status}`)
-  }
-  const data = await res.json()
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+
+  const result = await model.generateContent({ contents: apiMessages })
+  const text = result.response.text()
   if (!text) throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
   return text
 }
