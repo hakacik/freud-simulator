@@ -4,7 +4,7 @@ import './App.css'
 
 // ─── API Config ───────────────────────────────────────────────────────────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL_NAME = 'gemini-1.5-flash'
+const MODEL_NAME = 'gemini-1.5-pro'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     throw new Error('VITE_GEMINI_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Gemini API anahtarı ekleyin.')
   }
 
-  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY, { apiVersion: 'v1' })
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
     systemInstruction: systemPrompt,
