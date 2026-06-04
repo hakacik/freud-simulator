@@ -5,70 +5,11 @@ import './App.css'
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const API_BASE       = 'https://generativelanguage.googleapis.com/v1beta'
 
-// ─── Model Auto-Discovery ─────────────────────────────────────────────────────
-// Her API anahtarı farklı modellere erişebilir.
-// Uygulama açılışında ListModels ile mevcut modelleri keşfeder, en uygununu seçer.
-// Ücretsiz kotası olan flash/lite modeller önceliklidir.
-const MODEL_PRIORITY = [
-  'gemini-2.0-flash-lite',   // En ucuz, en geniş erişim
-  'gemini-2.0-flash',        // Stabil flash (2. nesil)
-  'gemini-2.5-flash',        // Yeni nesil flash
-  'gemini-1.5-flash-8b',     // Küçük, hızlı
-  'gemini-1.5-flash',        // Klasik stabil
-  'gemini-1.5-pro',
-  'gemini-1.0-pro',
-  'gemini-pro',
-  'gemini-2.5-pro',          // Son çare pro modeller
-  'gemini-2.0-pro',
-]
-let _activeModel = null   // cache
+// ─── Model ────────────────────────────────────────────────────────────────────
+const MODEL_NAME = 'gemini-1.5-flash'
 
-async function resolveModel() {
-  if (_activeModel) return _activeModel
-
-  try {
-    const listUrl = `${API_BASE}/models?key=${GEMINI_API_KEY}&pageSize=100`
-    const res = await fetch(listUrl)
-    if (!res.ok) throw new Error(`ListModels hatası: ${res.status}`)
-
-    const { models = [] } = await res.json()
-
-    // Yalnızca generateContent destekleyen modeller
-    const capable = models
-      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-      .map(m => m.name.replace('models/', ''))
-
-    console.info('[KPP] Erişilebilir modeller:', capable)
-
-    // Öncelik sırasına göre seç
-    for (const preferred of MODEL_PRIORITY) {
-      const match = capable.find(m => m === preferred || m.startsWith(preferred + '-'))
-      if (match) {
-        _activeModel = match
-        console.info('[KPP] Seçilen model:', _activeModel)
-        return _activeModel
-      }
-    }
-
-    // Hiçbiri bulunamazsa: önce flash/lite içeren bir model dene
-    // (pro modeller genellikle ücretsiz kota içermez)
-    const flashModel = capable.find(m => m.includes('flash') || m.includes('lite'))
-    if (flashModel) {
-      _activeModel = flashModel
-      console.info('[KPP] Flash fallback model:', _activeModel)
-      return _activeModel
-    }
-
-    // Son çare: listedeki ilk model
-    _activeModel = capable[0] || 'gemini-1.5-flash'
-    console.info('[KPP] Son çare model:', _activeModel)
-    return _activeModel
-  } catch (err) {
-    console.warn('[KPP] Model keşfi başarısız, varsayılan kullanılıyor:', err.message)
-    _activeModel = 'gemini-1.5-flash'
-    return _activeModel
-  }
-}
+// callGemini await resolveModel() kullandığından senkron sarmalayıcı
+async function resolveModel() { return MODEL_NAME }
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
