@@ -3,8 +3,57 @@ import './App.css'
 
 // ─── API Config ───────────────────────────────────────────────────────────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL_NAME    = 'gemini-1.5-flash'
-const API_BASE      = 'https://generativelanguage.googleapis.com/v1beta'
+const API_BASE       = 'https://generativelanguage.googleapis.com/v1beta'
+
+// ─── Model Auto-Discovery ─────────────────────────────────────────────────────────
+// Her API anahtarı farklı modellere erişebilir.
+// Uygulama açılışında ListModels ile mevcut modelleri keşfeder, en uygununu seçer.
+const MODEL_PRIORITY = [
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro',
+  'gemini-1.0-pro',
+  'gemini-pro',
+]
+let _activeModel = null   // cache
+
+async function resolveModel() {
+  if (_activeModel) return _activeModel
+
+  try {
+    const listUrl = `${API_BASE}/models?key=${GEMINI_API_KEY}&pageSize=100`
+    const res = await fetch(listUrl)
+    if (!res.ok) throw new Error(`ListModels hatası: ${res.status}`)
+
+    const { models = [] } = await res.json()
+
+    // Yalnızca generateContent destekleyen modeller
+    const capable = models
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace('models/', ''))
+
+    console.info('[KPP] Erişilebilir modeller:', capable)
+
+    // Öncelik sırasına göre seç
+    for (const preferred of MODEL_PRIORITY) {
+      const match = capable.find(m => m === preferred || m.startsWith(preferred + '-'))
+      if (match) {
+        _activeModel = match
+        console.info('[KPP] Seçilen model:', _activeModel)
+        return _activeModel
+      }
+    }
+
+    // Hiçbiri bulunamazsa listedeki ilk model
+    _activeModel = capable[0] || 'gemini-1.5-flash'
+    console.info('[KPP] Varsayılan model:', _activeModel)
+    return _activeModel
+  } catch (err) {
+    console.warn('[KPP] Model keşfi başarısız, varsayılan kullanılıyor:', err.message)
+    _activeModel = 'gemini-1.5-flash'
+    return _activeModel
+  }
+}
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -140,13 +189,13 @@ Aşağıdaki formatta, akademik ama destekleyici bir dille Türkçe süpervizyon
 }
 
 // ─── API Caller ───────────────────────────────────────────────────────────────
-// Direct REST fetch — SDK yerine doğrudan HTTP (tam kontrol)
 async function callGemini(systemPrompt, apiMessages, options = {}) {
   if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
     throw new Error('VITE_GEMINI_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Gemini API anahtarı ekleyin.')
   }
 
-  const url = `${API_BASE}/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`
+  const model = await resolveModel()
+  const url = `${API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`
 
   const res = await fetch(url, {
     method: 'POST',
@@ -165,6 +214,8 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
   })
 
   if (!res.ok) {
+    // Model bu çağrı için çalışmadıysa cache'i sıfırla ki bir sonraki denemede yeniden keşedilsin
+    _activeModel = null
     const errData = await res.json().catch(() => ({}))
     throw new Error(
       errData.error?.message || `API Hatası: ${res.status} ${res.statusText}`
