@@ -212,35 +212,62 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
   const model = await resolveModel()
   const url = `${API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      contents: apiMessages,
-      generationConfig: {
-        temperature: options.temperature ?? 0.85,
-        topP: 0.95,
-        maxOutputTokens: options.maxTokens ?? 1024,
-      }
-    })
-  })
+  const MAX_RETRIES = 2
+  let lastError = null
 
-  if (!res.ok) {
-    // Model bu çağrı için çalışmadıysa cache'i sıfırla ki bir sonraki denemede yeniden keşedilsin
-    _activeModel = null
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: apiMessages,
+        generationConfig: {
+          temperature: options.temperature ?? 0.85,
+          topP: 0.95,
+          maxOutputTokens: options.maxTokens ?? 1024,
+        }
+      })
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!text) throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
+      return text
+    }
+
     const errData = await res.json().catch(() => ({}))
-    throw new Error(
-      errData.error?.message || `API Hatası: ${res.status} ${res.statusText}`
-    )
+    const errMsg  = errData.error?.message || `API Hatası: ${res.status}`
+
+    // Kota / rate-limit hatası → bekleme süresi varsa otomatik yeniden dene
+    if (res.status === 429 || errMsg.toLowerCase().includes('quota')) {
+      const retryMatch = errMsg.match(/retry in ([\d.]+)s/i)
+      const waitSec    = retryMatch ? Math.min(parseFloat(retryMatch[1]), 60) : 15
+
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[KPP] Kota aşımı — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
+        await new Promise(r => setTimeout(r, waitSec * 1000))
+        continue   // tekrar dene
+      }
+
+      // Son deneme de başarısız → kullanıcıya açıklayıcı mesaj
+      lastError = new Error(
+        `⏱️ API Kota Sınırı Aşıldı\n\n` +
+        `Ücretsiz planda dakikada 15 istek limiti var. ` +
+        `Lütfen 1-2 dakika bekleyip tekrar deneyin.\n\n` +
+        `(Model: ${model} · Bekleme: ${Math.ceil(waitSec)}s)`
+      )
+      break
+    }
+
+    // Diğer hatalar için model cache'ini sıfırla
+    _activeModel = null
+    lastError = new Error(errMsg)
+    break
   }
 
-  const data = await res.json()
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text) throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
-  return text
+  throw lastError
 }
 
 function parseClientResponse(raw) {
