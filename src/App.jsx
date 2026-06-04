@@ -200,9 +200,18 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
       // Cohere farklı formatlarda yanıt dönebilir — tüm olasılıkları dene
       let text = null
 
-      // v2 chat: message.content dizi formatı
+      // v2 chat: message.content dizi formatı — önce text, sonra thinking fallback
       if (Array.isArray(data.message?.content)) {
+        // Önce type=text bloğu ara
         text = data.message.content.find(c => c.type === 'text')?.text ?? null
+        // text bloğu yoksa thinking bloğunu fallback olarak kullan
+        if (!text) {
+          const thinkingBlock = data.message.content.find(c => c.type === 'thinking')
+          if (thinkingBlock?.thinking) {
+            console.warn('[KPP] text bloğu yok, thinking bloğundan JSON aranıyor')
+            text = thinkingBlock.thinking
+          }
+        }
       }
       // v2 chat: message.content string formatı
       if (!text && typeof data.message?.content === 'string') {
@@ -750,7 +759,7 @@ export default function App() {
     try {
       rawText = await callGemini(CLIENT_GENERATION_PROMPT, [
         { role: 'user', parts: [{ text: 'Yeni bir danışan profili oluştur.' }] }
-      ], { temperature: 0.92, maxTokens: 900 })
+      ], { temperature: 0.92, maxTokens: 4096 })
 
       // Markdown kod bloklarını temizle (```json ... ``` veya ``` ... ```)
       const cleaned = rawText
