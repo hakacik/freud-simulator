@@ -1,15 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
 
-// ─── API Config ───────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const API_BASE       = 'https://generativelanguage.googleapis.com/v1beta'
-
-// ─── Model ────────────────────────────────────────────────────────────────────
-const MODEL_NAME = 'gemini-2.0-flash-lite-001'
-
-// callGemini await resolveModel() kullandığından senkron sarmalayıcı
-async function resolveModel() { return MODEL_NAME }
+// ─── API Config (Cohere) ──────────────────────────────────────────────────────
+const COHERE_API_KEY = import.meta.env.VITE_COHERE_API_KEY
+const COHERE_API_URL = 'https://api.cohere.com/v2/chat'
+const MODEL_NAME     = 'command-r'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -144,60 +139,70 @@ Aşağıdaki formatta, akademik ama destekleyici bir dille Türkçe süpervizyon
 - [APA 7. baskı formatında kaynak 3]`
 }
 
-// ─── API Caller ───────────────────────────────────────────────────────────────
+// ─── API Caller (Cohere) ──────────────────────────────────────────────────────
+// Gemini mesaj formatını (role: user/model, parts) Cohere formatına dönüştürür
+function toCohereMsgs(apiMessages) {
+  return apiMessages.map(m => ({
+    role: m.role === 'model' ? 'assistant' : 'user',
+    content: m.parts?.map(p => p.text).join('') ?? m.content ?? ''
+  }))
+}
+
 async function callGemini(systemPrompt, apiMessages, options = {}) {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
-    throw new Error('VITE_GEMINI_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Gemini API anahtarı ekleyin.')
+  if (!COHERE_API_KEY || COHERE_API_KEY === 'your_cohere_api_key_here') {
+    throw new Error('VITE_COHERE_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Cohere API anahtarı ekleyin.')
   }
 
-  const model = await resolveModel()
-  const url = `${API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`
+  // Son mesaj mevcut kullanıcı mesajı; öncekiler geçmiş
+  const allMsgs   = toCohereMsgs(apiMessages)
+  const lastMsg   = allMsgs[allMsgs.length - 1]
+  const history   = allMsgs.slice(0, -1)
 
   const MAX_RETRIES = 2
   let lastError = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(url, {
+    const res = await fetch(COHERE_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${COHERE_API_KEY}`,
+      },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: apiMessages,
-        generationConfig: {
-          temperature: options.temperature ?? 0.85,
-          topP: 0.95,
-          maxOutputTokens: options.maxTokens ?? 1024,
-        }
+        model:         MODEL_NAME,
+        preamble:      systemPrompt,
+        messages:      history.length > 0
+                         ? [...history, lastMsg]
+                         : [lastMsg],
+        temperature:   options.temperature ?? 0.85,
+        max_tokens:    options.maxTokens    ?? 1024,
+        p:             0.95,
       })
     })
 
     if (res.ok) {
       const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+      // Cohere v2 chat yanıtı: data.message.content[0].text
+      const text = data.message?.content?.[0]?.text
+                ?? data.text   // fallback eski format
       if (!text) throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
       return text
     }
 
     const errData = await res.json().catch(() => ({}))
-    const errMsg  = errData.error?.message || `API Hatası: ${res.status}`
+    const errMsg  = errData.message || errData.error?.message || `API Hatası: ${res.status}`
 
-    // Kota / rate-limit hatası → bekleme süresi varsa otomatik yeniden dene
-    if (res.status === 429 || errMsg.toLowerCase().includes('quota')) {
-      const retryMatch = errMsg.match(/retry in ([\d.]+)s/i)
-      const waitSec    = retryMatch ? Math.min(parseFloat(retryMatch[1]), 60) : 15
-
+    // Rate-limit hatası → otomatik yeniden dene
+    if (res.status === 429) {
+      const waitSec = 15
       if (attempt < MAX_RETRIES) {
-        console.warn(`[KPP] Kota aşımı — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
+        console.warn(`[KPP] Rate limit — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitSec * 1000))
-        continue   // tekrar dene
+        continue
       }
-
-      // Son deneme de başarısız → kullanıcıya açıklayıcı mesaj
       lastError = new Error(
-        `⏱️ API Kota Sınırı Aşıldı\n\n` +
-        `Ücretsiz planda dakikada 15 istek limiti var. ` +
-        `Lütfen 1-2 dakika bekleyip tekrar deneyin.\n\n` +
-        `(Model: ${model} · Bekleme: ${Math.ceil(waitSec)}s)`
+        `⏱️ API Rate Limit Aşıldı\n\n` +
+        `Lütfen 1-2 dakika bekleyip tekrar deneyin.\n\n(Model: ${MODEL_NAME})`
       )
       break
     }
