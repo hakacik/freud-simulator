@@ -6,7 +6,7 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const API_BASE       = 'https://generativelanguage.googleapis.com/v1beta'
 
 // ─── Model ────────────────────────────────────────────────────────────────────
-const MODEL_NAME = 'gemini-1.5-flash'
+const MODEL_NAME = 'gemini-2.0-flash-lite-001'
 
 // callGemini await resolveModel() kullandığından senkron sarmalayıcı
 async function resolveModel() { return MODEL_NAME }
