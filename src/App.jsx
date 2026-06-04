@@ -162,6 +162,14 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
   let lastError = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Sistem promptunu ilk mesajın önüne ekle (preamble desteklenmiyor)
+    const allMsgsWithSystem = allMsgs.map((msg, i) => {
+      if (i === 0 && msg.role === 'user') {
+        return { ...msg, content: `${systemPrompt}\n\n---\n\n${msg.content}` }
+      }
+      return msg
+    })
+
     const res = await fetch(COHERE_API_URL, {
       method: 'POST',
       headers: {
@@ -169,14 +177,11 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         'Authorization': `Bearer ${COHERE_API_KEY}`,
       },
       body: JSON.stringify({
-        model:         MODEL_NAME,
-        preamble:      systemPrompt,
-        messages:      history.length > 0
-                         ? [...history, lastMsg]
-                         : [lastMsg],
-        temperature:   options.temperature ?? 0.85,
-        max_tokens:    options.maxTokens    ?? 1024,
-        p:             0.95,
+        model:       MODEL_NAME,
+        messages:    allMsgsWithSystem,
+        temperature: options.temperature ?? 0.85,
+        max_tokens:  options.maxTokens   ?? 1024,
+        p:           0.95,
       })
     })
 
