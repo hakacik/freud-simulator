@@ -42,7 +42,13 @@ YALNIZCA aşağıdaki JSON formatında yanıt ver. Başka hiçbir metin, açıkl
   "gizliTemalar": ["Derin ama dile getirmediği tema 1", "Tema 2"]
 }
 
-⚠️ KRİTİK KURAL: YANITININ KESİNLİKLE SADECE YUKARDAKI FORMATTA HAM JSON OLMASI GEREKİYOR. Markdown (backtick json veya backtick) kullanma. Açıklama veya giriş metni yazma. Sadece { ile başlayıp } ile biten saf JSON döndür.`
+ONEMLI ZORUNLU KURALLAR:
+1. YANITINI SADECE VE SADECE GECERLI BIR JSON OBJESI OLARAK DONDUR.
+2. JSON objesi disinda tek bir kelime, selamlasma veya aciklama YAZMA.
+3. Tum ozellik isimlerini cift tirnak icine al.
+4. Fazladan virgul kullanma (trailing comma JSON'u bozar).
+5. Markdown isareti (json veya kod blogu acma/kapama) KULLANMA.
+6. Yanitinin ilk karakteri { olmali, son karakteri } olmali.`
 
 function buildSessionSystemPrompt(profile) {
   return `Sen bir Klinik Pratik Simülasyon Platformu'sun. Aşağıdaki danışan profilini tutarlı ve gerçekçi biçimde canlandırıyorsun. Karşındaki kişi psikoloji öğrencisidir; bu bir eğitim seansıdır.
@@ -761,9 +767,12 @@ export default function App() {
 
       let parsed
       try {
+        console.log('[KPP] Cohere Ham Yanıtı (cleaned):', jsonMatch[0])
         parsed = JSON.parse(jsonMatch[0])
       } catch (parseErr) {
-        console.error('[KPP] JSON.parse hatası:', parseErr.message, '\nHam yanıt:', rawText)
+        console.error('[KPP] JSON Parse Hatası:', parseErr.message)
+        console.error('[KPP] Parse edilemeyen metin:', jsonMatch[0])
+        console.error('[KPP] Ham API yanıtı:', rawText)
         throw new Error('Danışan profili JSON formatı geçersiz. Tekrar deneyin.')
       }
 
