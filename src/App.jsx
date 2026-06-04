@@ -4,7 +4,7 @@ import './App.css'
 // ─── API Config (Cohere) ──────────────────────────────────────────────────────
 const COHERE_API_KEY = import.meta.env.VITE_COHERE_API_KEY
 const COHERE_API_URL = 'https://api.cohere.com/v2/chat'
-const MODEL_NAME     = 'command'
+const MODEL_NAME     = 'command-a-plus-05-2026'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
