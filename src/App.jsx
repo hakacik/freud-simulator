@@ -202,8 +202,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
       break
     }
 
-    // Diğer hatalar için model cache'ini sıfırla
-    _activeModel = null
+    // Diğer hatalar
     lastError = new Error(errMsg)
     break
   }
