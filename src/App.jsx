@@ -40,7 +40,9 @@ YALNIZCA aşağıdaki JSON formatında yanıt ver. Başka hiçbir metin, açıkl
     "terapistAlgisi": "Terapiste ilk yaklaşımı nasıl"
   },
   "gizliTemalar": ["Derin ama dile getirmediği tema 1", "Tema 2"]
-}`
+}
+
+⚠️ KRİTİK KURAL: YANITININ KESİNLİKLE SADECE YUKARDAKI FORMATTA HAM JSON OLMASI GEREKİYOR. Markdown (backtick json veya backtick) kullanma. Açıklama veya giriş metni yazma. Sadece { ile başlayıp } ile biten saf JSON döndür.`
 
 function buildSessionSystemPrompt(profile) {
   return `Sen bir Klinik Pratik Simülasyon Platformu'sun. Aşağıdaki danışan profilini tutarlı ve gerçekçi biçimde canlandırıyorsun. Karşındaki kişi psikoloji öğrencisidir; bu bir eğitim seansıdır.
@@ -187,10 +189,32 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 
     if (res.ok) {
       const data = await res.json()
-      // Cohere v2 chat yanıtı: data.message.content[0].text
-      const text = data.message?.content?.[0]?.text
-                ?? data.text   // fallback eski format
-      if (!text) throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
+      console.log('[KPP] Cohere ham yanıt:', JSON.stringify(data).slice(0, 400))
+
+      // Cohere farklı formatlarda yanıt dönebilir — tüm olasılıkları dene
+      let text = null
+
+      // v2 chat: message.content dizi formatı
+      if (Array.isArray(data.message?.content)) {
+        text = data.message.content.find(c => c.type === 'text')?.text ?? null
+      }
+      // v2 chat: message.content string formatı
+      if (!text && typeof data.message?.content === 'string') {
+        text = data.message.content
+      }
+      // v1 generate endpoint
+      if (!text && data.text) {
+        text = data.text
+      }
+      // v1 generate: generations dizisi
+      if (!text && data.generations?.[0]?.text) {
+        text = data.generations[0].text
+      }
+
+      if (!text) {
+        console.error('[KPP] Yanıt parse edilemedi. Tam yanıt:', JSON.stringify(data))
+        throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
+      }
       return text
     }
 
