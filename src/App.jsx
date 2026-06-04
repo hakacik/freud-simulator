@@ -5,15 +5,21 @@ import './App.css'
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const API_BASE       = 'https://generativelanguage.googleapis.com/v1beta'
 
-// ─── Model Auto-Discovery ─────────────────────────────────────────────────────────
+// ─── Model Auto-Discovery ─────────────────────────────────────────────────────
 // Her API anahtarı farklı modellere erişebilir.
 // Uygulama açılışında ListModels ile mevcut modelleri keşfeder, en uygununu seçer.
+// Ücretsiz kotası olan flash/lite modeller önceliklidir.
 const MODEL_PRIORITY = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
+  'gemini-2.0-flash-lite',   // En ucuz, en geniş erişim
+  'gemini-2.0-flash',        // Stabil flash (2. nesil)
+  'gemini-2.5-flash',        // Yeni nesil flash
+  'gemini-1.5-flash-8b',     // Küçük, hızlı
+  'gemini-1.5-flash',        // Klasik stabil
   'gemini-1.5-pro',
   'gemini-1.0-pro',
   'gemini-pro',
+  'gemini-2.5-pro',          // Son çare pro modeller
+  'gemini-2.0-pro',
 ]
 let _activeModel = null   // cache
 
@@ -44,9 +50,18 @@ async function resolveModel() {
       }
     }
 
-    // Hiçbiri bulunamazsa listedeki ilk model
+    // Hiçbiri bulunamazsa: önce flash/lite içeren bir model dene
+    // (pro modeller genellikle ücretsiz kota içermez)
+    const flashModel = capable.find(m => m.includes('flash') || m.includes('lite'))
+    if (flashModel) {
+      _activeModel = flashModel
+      console.info('[KPP] Flash fallback model:', _activeModel)
+      return _activeModel
+    }
+
+    // Son çare: listedeki ilk model
     _activeModel = capable[0] || 'gemini-1.5-flash'
-    console.info('[KPP] Varsayılan model:', _activeModel)
+    console.info('[KPP] Son çare model:', _activeModel)
     return _activeModel
   } catch (err) {
     console.warn('[KPP] Model keşfi başarısız, varsayılan kullanılıyor:', err.message)
