@@ -766,18 +766,38 @@ export default function App() {
     setIsLoading(true)
     setError(null)
     setPhase('loading')
+    let rawText = ''
     try {
-      const raw = await callGemini(CLIENT_GENERATION_PROMPT, [
+      rawText = await callGemini(CLIENT_GENERATION_PROMPT, [
         { role: 'user', parts: [{ text: 'Yeni bir danışan profili oluştur.' }] }
       ], { temperature: 0.92, maxTokens: 900 })
 
-      const jsonMatch = raw.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) throw new Error('Danışan profili oluşturulamadı. Tekrar deneyin.')
-      const parsed = JSON.parse(jsonMatch[0])
+      // Markdown kod bloklarını temizle (```json ... ``` veya ``` ... ```)
+      const cleaned = rawText
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim()
+
+      // { ... } bloğunu yakala
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) {
+        console.error('[KPP] JSON bloğu bulunamadı. Ham yanıt:', rawText)
+        throw new Error('Danışan profili oluşturulamadı — AI JSON formatında yanıt vermedi. Tekrar deneyin.')
+      }
+
+      let parsed
+      try {
+        parsed = JSON.parse(jsonMatch[0])
+      } catch (parseErr) {
+        console.error('[KPP] JSON.parse hatası:', parseErr.message, '\nHam yanıt:', rawText)
+        throw new Error('Danışan profili JSON formatı geçersiz. Tekrar deneyin.')
+      }
+
       setProfile(parsed)
       setSessionNum(n => n + 1)
       setPhase('briefing')
     } catch (err) {
+      console.error('[KPP] generateProfile hatası:', err.message, '\nHam yanıt:', rawText)
       handleError(err, 'welcome')
     } finally {
       setIsLoading(false)
