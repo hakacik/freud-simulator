@@ -251,13 +251,15 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     throw new Error('VITE_COHERE_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Cohere API anahtari ekleyin.')
   }
 
-  // Sistem promptunu role:"system" mesaji olarak en basa ekle
-  // Conversation history sadece user/assistant icerir — sistem talimati karismaz
+  // Sistem promptunu ilk user mesajinin onune ekle
+  // (Cohere v2/chat role:system alanini kesin desteklemeyebilir)
   const conversationMsgs = toCohereMsgs(apiMessages)
-  const messagesWithSystem = [
-    { role: 'system', content: systemPrompt },
-    ...conversationMsgs
-  ]
+  const messagesWithSystem = conversationMsgs.map((msg, i) => {
+    if (i === 0 && msg.role === 'user') {
+      return { ...msg, content: systemPrompt + '\n\n---\n\n' + msg.content }
+    }
+    return msg
+  })
 
   const MAX_RETRIES = 2
   let lastError = null
@@ -342,7 +344,8 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     break
   }
 
-  throw lastError
+  // lastError null kalirsa (beklenmeyen durum) genel hata mesaji
+  throw lastError ?? new Error('Bilinmeyen bir API hatasi olustu. Lutfen tekrar deneyin.')
 }
 
 function parseClientResponse(raw) {
