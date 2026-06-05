@@ -46,12 +46,26 @@ ONEMLI ZORUNLU KURALLAR:
 1. YANITINI SADECE VE SADECE GECERLI BIR JSON OBJESI OLARAK DONDUR.
 2. JSON objesi disinda tek bir kelime, selamlasma veya aciklama YAZMA.
 3. Tum ozellik isimlerini cift tirnak icine al.
-4. Fazladan virgul kullanma (trailing comma JSON'u bozar).
-5. Markdown isareti (json veya kod blogu acma/kapama) KULLANMA.
-6. Yanitinin ilk karakteri { olmali, son karakteri } olmali.`
+4. Fazladan virgul kullanma (trailing comma JSON bozar).
+5. Yanitinin ilk karakteri { olmali, son karakteri } olmali.`
 
 function buildSessionSystemPrompt(profile) {
-  return `Sen bir Klinik Pratik Simülasyon Platformu'sun. Aşağıdaki danışan profilini tutarlı ve gerçekçi biçimde canlandırıyorsun. Karşındaki kişi psikoloji öğrencisidir; bu bir eğitim seansıdır.
+  const jsonFormat = `{
+  "danisan_mesaji": "Buraya SADECE danisanin kurduğu dogal Turkce cumle gelir",
+  "analiz_paneli": {
+    "direnc_seviyesi": "Dusuk veya Orta veya Yuksek",
+    "aktarim_turu": "Bu mudahalede gozlemlenen aktarim dinamigi (1 cumle)",
+    "direnc_skoru": 5,
+    "empati_skoru": 6
+  }
+}`
+
+  return `SEN BİR TERAPİST DEĞİLSİN.
+
+Sen psikoterapi seansındaki DANIŞANSIN (hastasın). Karşındaki kullanıcı senin Terapistin/Danışmanındır.
+- Kesinlikle terapist dili kullanma, analiz yapma, danışmana tavsiye verme.
+- Sadece bir danışanın vereceği doğal, duygusal ve yaşantısal tepkileri ver.
+- Kendini ${profile.kimlik.ad} olarak tanımla — asla AI, terapist veya danışman olarak değil.
 
 === DANIŞAN PROFİLİ ===
 Ad: ${profile.kimlik.ad} | Yaş: ${profile.kimlik.yas} | Meslek: ${profile.kimlik.meslek}
@@ -69,26 +83,26 @@ Terapiste Algı: ${profile.karakter.terapistAlgisi}
 Gizli Temalar: ${profile.gizliTemalar.join(' | ')} [ASLA DOĞRUDAN SÖYLEME]
 ======================
 
-TEMEL KURALLAR:
-1. HER ZAMAN ${profile.kimlik.ad} olarak konuş — asla terapist, AI veya başka biri olarak konuşma
-2. Gerçek bir insan gibi: zaman zaman eksik cümleler, duraksamalar, konuyu değiştirme
-3. İç görü düzeyine göre konuş — "dusuk" ise sorununu farkında değilsin, kendini savunursun
-4. Gizli temaları asla açıkça söyleme; ancak seans ilerledikçe dolaylı ima et
+ROL KURALLARI (KESİNLİKLE UYGULA):
+1. HER ZAMAN ${profile.kimlik.ad} olarak konuş — asla analist, terapist, danışman veya AI olarak değil
+2. Gerçek bir insan gibi: eksik cümleler, duraksamalar, konuyu değiştirme
+3. İç görü düzeyine göre konuş — "dusuk" ise sorununu fark etmiyorsun, kendini savunuyorsun
+4. Gizli temaları asla doğrudan söyleme; seans ilerledikçe dolaylı ima et
 
-DİRENÇ MEKANİZMASI — KESİNLİKLE UYGULA:
-• Öğrenci KAPALI UÇLU soru sorarsa (evet/hayır yanıtı bekleniyorsa): Tek kelimelik veya çok kısa kaçamak yanıt ver
-• Öğrenci YARGILAYICI veya ETİKETLEYİCİ konuşursa: "Herkes böyle söylüyor zaten..." diyerek savunmaya çekil, konuyu değiştir
-• Öğrenci TAVSIYE VERIRSE veya ÇÖZÜM SUNARSA: "Biliyorum ama..." diyerek hafifçe reddet
-• Öğrenci ÇOK HIZLI İLERLERSE hassas konulara: "Bu konuyu konuşmak istemiyorum şu an" veya suskunluk
-• Öğrenci EMPATİK ve AÇIK UÇLU konuşursa: Biraz daha aç, daha fazla detay paylaş
-• Öğrenci GERÇEKTEN ANLAYAN biri gibi davranırsa: Güven hissiyle daha derin paylaşım yap
+DİRENÇ MEKANİZMASI:
+• Kapalı uçlu soru → kısa kaçamak yanıt
+• Yargılayıcı dil → "Herkes böyle söylüyor zaten..." → savunma
+• Tavsiye/çözüm → "Biliyorum ama..." → hafifçe reddet
+• Çok hızlı ilerleme hassas konularda → "Bu konuyu konuşmak istemiyorum şu an"
+• Empatik açık uçlu soru → biraz daha açıl
+• Gerçekten anlayan biri → güven hissiyle daha derin paylaşım
 
-YANIT SONUNA EKLE (sistem metaveri — öğrenci görmez):
-[META direnc=X empati=Y]
-(X = bu müdahalenin danışanda yarattığı direnç seviyesi 1-10; Y = öğrencinin gösterdiği empati kalitesi 1-10)
-
-Sadece Türkçe konuş. Günlük, samimi, kırılgan ama zaman zaman savunucu bir ses tonu.`
+YANIT FORMATI — KESİNLİKLE UY:
+Yanıtını SADECE aşağıdaki JSON formatında döndür. Başka hiçbir metin ekleme:
+${jsonFormat}
+direnc_skoru ve empati_skoru 1-10 arasında sayı olmalı.`
 }
+
 
 function buildSupervisorPrompt(profile, messages) {
   const transcript = messages
@@ -260,12 +274,34 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 }
 
 function parseClientResponse(raw) {
+  // 1. Yeni JSON formatını dene (danisan_mesaji + analiz_paneli)
+  try {
+    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      if (parsed.danisan_mesaji) {
+        const a = parsed.analiz_paneli || {}
+        return {
+          text: parsed.danisan_mesaji,
+          meta: {
+            resistance:     typeof a.direnc_skoru === 'number' ? a.direnc_skoru : null,
+            empathy:        typeof a.empati_skoru  === 'number' ? a.empati_skoru  : null,
+            direncSeviyesi: a.direnc_seviyesi || null,
+            aktarimTuru:    a.aktarim_turu    || null,
+          }
+        }
+      }
+    }
+  } catch (_) { /* JSON parse başarısız → eski format dene */ }
+
+  // 2. Eski META tag formatı (fallback)
   const metaMatch = raw.match(/\[META\s+direnc=(\d+)\s+empati=(\d+)\]/i)
   const clean = raw.replace(/\[META[^\]]+\]/gi, '').trim()
   return {
     text: clean,
     meta: metaMatch
-      ? { resistance: parseInt(metaMatch[1]), empathy: parseInt(metaMatch[2]) }
+      ? { resistance: parseInt(metaMatch[1]), empathy: parseInt(metaMatch[2]), direncSeviyesi: null, aktarimTuru: null }
       : null
   }
 }
