@@ -195,36 +195,74 @@ Aşağıdaki formatta, akademik ama destekleyici bir dille Türkçe süpervizyon
 - [APA 7. baskı formatında kaynak 3]`
 }
 
+// ─── Injection Koruması ───────────────────────────────────────────────────────
+const INJECTION_PATTERNS = [
+  /sistem talimat/i,
+  /system prompt/i,
+  /ignore previous instructions/i,
+  /bu talimatlari unut/i,
+  /rol degistir/i,
+  /terapist ol/i,
+  /artik.*degilsin/i,
+]
+
+function sanitizeUserMessage(text) {
+  const flagged = INJECTION_PATTERNS.some(p => p.test(text))
+  return { content: text, flagged }
+}
+
+// ─── JSON Parse Helper ────────────────────────────────────────────────────────
+function parseModelResponse(rawContent) {
+  try {
+    const cleaned = rawContent
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim()
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error('JSON blogu bulunamadi')
+    const parsed = JSON.parse(jsonMatch[0])
+    if (!parsed.danisan_mesaji || !parsed.analiz_paneli) {
+      throw new Error('Eksik alan: danisan_mesaji veya analiz_paneli yok')
+    }
+    return { success: true, data: parsed }
+  } catch (err) {
+    console.error('[KPP] parseModelResponse hata:', err.message, '| Ham:', rawContent.slice(0, 200))
+    return { success: false, error: err.message, raw: rawContent }
+  }
+}
+
 // ─── API Caller (Cohere) ──────────────────────────────────────────────────────
 // Gemini mesaj formatını (role: user/model, parts) Cohere formatına dönüştürür
+// Sadece user/assistant rolleri alınır — sistem mesajı callGemini içinde ayrı eklenir
 function toCohereMsgs(apiMessages) {
-  return apiMessages.map(m => ({
-    role: m.role === 'model' ? 'assistant' : 'user',
-    content: m.parts?.map(p => p.text).join('') ?? m.content ?? ''
-  }))
+  return apiMessages
+    .filter(m => m.role === 'user' || m.role === 'model')
+    .map(m => ({
+      role: m.role === 'model' ? 'assistant' : 'user',
+      content: m.parts?.map(p => p.text).join('') ?? m.content ?? ''
+    }))
 }
 
 async function callGemini(systemPrompt, apiMessages, options = {}) {
   if (!COHERE_API_KEY || COHERE_API_KEY === 'your_cohere_api_key_here') {
-    throw new Error('VITE_COHERE_API_KEY .env dosyasında tanımlanmamış. Lütfen geçerli bir Cohere API anahtarı ekleyin.')
+    throw new Error('VITE_COHERE_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Cohere API anahtari ekleyin.')
   }
 
-  // Son mesaj mevcut kullanıcı mesajı; öncekiler geçmiş
-  const allMsgs   = toCohereMsgs(apiMessages)
-  const lastMsg   = allMsgs[allMsgs.length - 1]
-  const history   = allMsgs.slice(0, -1)
+  // Sistem promptunu role:"system" mesaji olarak en basa ekle
+  // Conversation history sadece user/assistant icerir — sistem talimati karismaz
+  const conversationMsgs = toCohereMsgs(apiMessages)
+  const messagesWithSystem = [
+    { role: 'system', content: systemPrompt },
+    ...conversationMsgs
+  ]
 
   const MAX_RETRIES = 2
   let lastError = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    // Sistem promptunu ilk mesajın önüne ekle (preamble desteklenmiyor)
-    const allMsgsWithSystem = allMsgs.map((msg, i) => {
-      if (i === 0 && msg.role === 'user') {
-        return { ...msg, content: `${systemPrompt}\n\n---\n\n${msg.content}` }
-      }
-      return msg
-    })
 
     const res = await fetch(COHERE_API_URL, {
       method: 'POST',
@@ -234,7 +272,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
       },
       body: JSON.stringify({
         model:       MODEL_NAME,
-        messages:    allMsgsWithSystem,
+        messages:    messagesWithSystem,   // role:system + user/assistant — temiz ayrım
         temperature: options.temperature ?? 0.85,
         max_tokens:  options.maxTokens   ?? 1024,
         p:           0.95,
@@ -906,16 +944,27 @@ export default function App() {
     setIsLoading(true)
     setError(null)
 
+    // Injection koruması — sistem talimatı sızdırma girişimlerini engelle
+    const { flagged } = sanitizeUserMessage(text)
+    if (flagged) {
+      setError('Bu tür yönlendirmeler simülasyon güvenliği nedeniyle engellenmiştir.')
+      setIsLoading(false)
+      return
+    }
+
     const userMsg = { role: 'user', content: text, rawContent: text }
     const updated = [...messages, userMsg]
     setMessages(updated)
 
     try {
       const systemPrompt = buildSessionSystemPrompt(profile)
-      const apiMsgs = updated.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.rawContent || m.content }]
-      }))
+      // Sadece user/assistant mesajları — sistem talimatı callGemini içinde role:system olarak gönderilir
+      const apiMsgs = updated
+        .filter(m => !m.isHidden || m.role === 'user')
+        .map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.rawContent || m.content }]
+        }))
       const raw = await callGemini(systemPrompt, apiMsgs)
       const { text: clientText, meta } = parseClientResponse(raw)
       setMessages(prev => [...prev, { role: 'model', content: clientText, rawContent: raw, meta }])
