@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
 
-// ─── API Config (Cohere) ──────────────────────────────────────────────────────
-const COHERE_API_KEY = import.meta.env.VITE_COHERE_API_KEY
-const COHERE_API_URL = 'https://api.cohere.com/v2/chat'
-const MODEL_NAME     = 'command-r-plus-08-2024'
+// ─── API Config (OpenRouter) ─────────────────────────────────────────────────
+const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const MODEL_NAME         = 'meta-llama/llama-3-8b-instruct:free'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -234,10 +234,10 @@ function parseModelResponse(rawContent) {
   }
 }
 
-// ─── API Caller (Cohere) ──────────────────────────────────────────────────────
-// Gemini mesaj formatını (role: user/model, parts) Cohere formatına dönüştürür
-// Sadece user/assistant rolleri alınır — sistem mesajı callGemini içinde ayrı eklenir
-function toCohereMsgs(apiMessages) {
+// ─── API Caller (OpenRouter) ──────────────────────────────────────────────────
+// Dahili mesaj formatını (role: user/model, parts) OpenAI-uyumlu formata çevirir
+// OpenRouter natively role:system destekler — sistem mesajı ayrı gönderilir
+function toOpenAIMsgs(apiMessages) {
   return apiMessages
     .filter(m => m.role === 'user' || m.role === 'model')
     .map(m => ({
@@ -247,13 +247,12 @@ function toCohereMsgs(apiMessages) {
 }
 
 async function callGemini(systemPrompt, apiMessages, options = {}) {
-  if (!COHERE_API_KEY || COHERE_API_KEY === 'your_cohere_api_key_here') {
-    throw new Error('VITE_COHERE_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Cohere API anahtari ekleyin.')
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('VITE_OPENROUTER_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir OpenRouter API anahtari ekleyin.')
   }
 
-  // Sistem promptunu role:"system" olarak gönder — kullanıcı mesajına karmıyoruz
-  // Boylece model sistem talimatı ile kullanıcı mesajlarını ayırt edebiliyor
-  const conversationMsgs = toCohereMsgs(apiMessages)
+  // Sistem promptunu role:"system" olarak en basa ekle (OpenAI formatı)
+  const conversationMsgs = toOpenAIMsgs(apiMessages)
   const messagesWithSystem = [
     { role: 'system', content: systemPrompt },
     ...conversationMsgs
@@ -264,62 +263,28 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 
-    const res = await fetch(COHERE_API_URL, {
+    const res = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COHERE_API_KEY}`,
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://freud-simulator.netlify.app',
+        'X-Title': 'Freud Simulator',
       },
       body: JSON.stringify({
         model:       MODEL_NAME,
-        messages:    messagesWithSystem,   // role:system + user/assistant — temiz ayrım
+        messages:    messagesWithSystem,
         temperature: options.temperature ?? 0.85,
-        max_tokens:  options.maxTokens   ?? 4096,
-        p:           0.95,
+        max_tokens:  options.maxTokens   ?? 2048,
       })
     })
 
     if (res.ok) {
       const data = await res.json()
-      console.log('[KPP] Cohere ham yanıt:', JSON.stringify(data).slice(0, 800))
+      console.log('[KPP] OpenRouter yanıt:', JSON.stringify(data).slice(0, 600))
 
-      // Cohere farklı formatlarda yanıt dönebilir — tüm olasılıkları dene
-      let text = null
-
-      // v2 chat: message.content dizi formatı
-      if (Array.isArray(data.message?.content)) {
-        console.log('[KPP] content blokları:', data.message.content.map(c => c.type))
-        // text bloğunu al (thinking bloğu varsa atla)
-        const textBlock = data.message.content.find(c => c.type === 'text')
-        text = textBlock?.text ?? null
-        if (!text) {
-          // thinking-only durum: thinking bloğundan JSON çıkar
-          const thinkingBlock = data.message.content.find(c => c.type === 'thinking')
-          if (thinkingBlock?.thinking) {
-            console.warn('[KPP] text bloğu yok — thinking bloğundan JSON aranıyor')
-            const allMatches = [...thinkingBlock.thinking.matchAll(/\{[\s\S]*?\}/g)]
-            for (let i = allMatches.length - 1; i >= 0; i--) {
-              try {
-                const c = JSON.parse(allMatches[i][0])
-                if (c.danisan_mesaji) { text = allMatches[i][0]; break }
-              } catch (_) {}
-            }
-            if (!text) text = thinkingBlock.thinking
-          }
-        }
-      }
-      // v2 chat: message.content string formatı
-      if (!text && typeof data.message?.content === 'string') {
-        text = data.message.content
-      }
-      // v1 generate endpoint
-      if (!text && data.text) {
-        text = data.text
-      }
-      // v1 generate: generations dizisi
-      if (!text && data.generations?.[0]?.text) {
-        text = data.generations[0].text
-      }
+      // OpenAI-uyumlu format: choices[0].message.content
+      const text = data.choices?.[0]?.message?.content ?? null
 
       if (!text) {
         console.error('[KPP] Yanıt parse edilemedi. Tam yanıt:', JSON.stringify(data))
@@ -329,7 +294,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     }
 
     const errData = await res.json().catch(() => ({}))
-    const errMsg  = errData.message || errData.error?.message || `API Hatası: ${res.status}`
+    const errMsg  = errData.error?.message || errData.message || `API Hatası: ${res.status}`
 
     // Rate-limit hatası → otomatik yeniden dene
     if (res.status === 429) {
@@ -340,8 +305,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         continue
       }
       lastError = new Error(
-        `⏱️ API Rate Limit Aşıldı\n\n` +
-        `Lütfen 1-2 dakika bekleyip tekrar deneyin.\n\n(Model: ${MODEL_NAME})`
+        `⏱️ API Rate Limit Aşıldı\n\nLütfen 1-2 dakika bekleyip tekrar deneyin.\n\n(Model: ${MODEL_NAME})`
       )
       break
     }
@@ -351,7 +315,6 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     break
   }
 
-  // lastError null kalirsa (beklenmeyen durum) genel hata mesaji
   throw lastError ?? new Error('Bilinmeyen bir API hatasi olustu. Lutfen tekrar deneyin.')
 }
 
