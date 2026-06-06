@@ -4,7 +4,7 @@ import './App.css'
 // ─── API Config (Cohere) ──────────────────────────────────────────────────────
 const COHERE_API_KEY = import.meta.env.VITE_COHERE_API_KEY
 const COHERE_API_URL = 'https://api.cohere.com/v2/chat'
-const MODEL_NAME     = 'command-a-plus-05-2026'
+const MODEL_NAME     = 'command-r-plus-08-2024'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -286,28 +286,25 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
       // Cohere farklı formatlarda yanıt dönebilir — tüm olasılıkları dene
       let text = null
 
-      // v2 chat: message.content dizi formatı — önce text, sonra thinking fallback
+      // v2 chat: message.content dizi formatı
       if (Array.isArray(data.message?.content)) {
         console.log('[KPP] content blokları:', data.message.content.map(c => c.type))
-        // Önce type=text bloğu ara
-        text = data.message.content.find(c => c.type === 'text')?.text ?? null
-        // text bloğu yoksa thinking bloğundan SON JSON bloğunu çıkar
+        // text bloğunu al (thinking bloğu varsa atla)
+        const textBlock = data.message.content.find(c => c.type === 'text')
+        text = textBlock?.text ?? null
         if (!text) {
+          // thinking-only durum: thinking bloğundan JSON çıkar
           const thinkingBlock = data.message.content.find(c => c.type === 'thinking')
           if (thinkingBlock?.thinking) {
-            console.warn('[KPP] text bloğu yok, thinking bloğundan SON JSON aranıyor')
-            // Model kendi düşüncesinde son olarak yazdığı JSON'u al
-            const allJsonMatches = [...thinkingBlock.thinking.matchAll(/\{[\s\S]*?\}/g)]
-            if (allJsonMatches.length > 0) {
-              // Sondan başa doğru `danisan_mesaji` içeren JSON'u bul
-              for (let i = allJsonMatches.length - 1; i >= 0; i--) {
-                try {
-                  const candidate = JSON.parse(allJsonMatches[i][0])
-                  if (candidate.danisan_mesaji) { text = allJsonMatches[i][0]; break }
-                } catch (_) {}
-              }
+            console.warn('[KPP] text bloğu yok — thinking bloğundan JSON aranıyor')
+            const allMatches = [...thinkingBlock.thinking.matchAll(/\{[\s\S]*?\}/g)]
+            for (let i = allMatches.length - 1; i >= 0; i--) {
+              try {
+                const c = JSON.parse(allMatches[i][0])
+                if (c.danisan_mesaji) { text = allMatches[i][0]; break }
+              } catch (_) {}
             }
-            if (!text) text = thinkingBlock.thinking  // son çare: ham thinking metni
+            if (!text) text = thinkingBlock.thinking
           }
         }
       }
