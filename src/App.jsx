@@ -276,28 +276,40 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         model:       MODEL_NAME,
         messages:    messagesWithSystem,   // role:system + user/assistant — temiz ayrım
         temperature: options.temperature ?? 0.85,
-        max_tokens:  options.maxTokens   ?? 1024,
+        max_tokens:  options.maxTokens   ?? 4096,
         p:           0.95,
       })
     })
 
     if (res.ok) {
       const data = await res.json()
-      console.log('[KPP] Cohere ham yanıt:', JSON.stringify(data).slice(0, 400))
+      console.log('[KPP] Cohere ham yanıt:', JSON.stringify(data).slice(0, 800))
 
       // Cohere farklı formatlarda yanıt dönebilir — tüm olasılıkları dene
       let text = null
 
       // v2 chat: message.content dizi formatı — önce text, sonra thinking fallback
       if (Array.isArray(data.message?.content)) {
+        console.log('[KPP] content blokları:', data.message.content.map(c => c.type))
         // Önce type=text bloğu ara
         text = data.message.content.find(c => c.type === 'text')?.text ?? null
-        // text bloğu yoksa thinking bloğunu fallback olarak kullan
+        // text bloğu yoksa thinking bloğundan SON JSON bloğunu çıkar
         if (!text) {
           const thinkingBlock = data.message.content.find(c => c.type === 'thinking')
           if (thinkingBlock?.thinking) {
-            console.warn('[KPP] text bloğu yok, thinking bloğundan JSON aranıyor')
-            text = thinkingBlock.thinking
+            console.warn('[KPP] text bloğu yok, thinking bloğundan SON JSON aranıyor')
+            // Model kendi düşüncesinde son olarak yazdığı JSON'u al
+            const allJsonMatches = [...thinkingBlock.thinking.matchAll(/\{[\s\S]*?\}/g)]
+            if (allJsonMatches.length > 0) {
+              // Sondan başa doğru `danisan_mesaji` içeren JSON'u bul
+              for (let i = allJsonMatches.length - 1; i >= 0; i--) {
+                try {
+                  const candidate = JSON.parse(allJsonMatches[i][0])
+                  if (candidate.danisan_mesaji) { text = allJsonMatches[i][0]; break }
+                } catch (_) {}
+              }
+            }
+            if (!text) text = thinkingBlock.thinking  // son çare: ham thinking metni
           }
         }
       }
