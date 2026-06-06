@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
 
-// ─── API Config (OpenRouter) ─────────────────────────────────────────────────
-const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL_NAME         = 'meta-llama/llama-3.1-8b-instruct:free'
+// ─── API Config (Groq) ──────────────────────────────────────────────────
+const OPENROUTER_API_KEY = import.meta.env.VITE_GROQ_API_KEY
+const OPENROUTER_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const MODEL_NAME         = 'llama3-70b-8192'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -248,7 +248,7 @@ function toOpenAIMsgs(apiMessages) {
 
 async function callGemini(systemPrompt, apiMessages, options = {}) {
   if (!OPENROUTER_API_KEY) {
-    throw new Error('VITE_OPENROUTER_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir OpenRouter API anahtari ekleyin.')
+    throw new Error('VITE_GROQ_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Groq API anahtari ekleyin.')
   }
 
   // Sistem promptunu role:"system" olarak en basa ekle (OpenAI formatı)
