@@ -349,18 +349,26 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 }
 
 function parseClientResponse(raw) {
-  // 1. Yeni JSON formatını dene (danisan_mesaji + analiz_paneli)
-  try {
-    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
+  // Markdown temizle
+  const cleaned = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim()
+
+  // 1. JSON formatı dene (danisan_mesaji + analiz_paneli)
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
       const parsed = JSON.parse(jsonMatch[0])
       if (parsed.danisan_mesaji) {
         const a = parsed.analiz_paneli || {}
+        console.log('[KPP] parseClientResponse: JSON basarili, danisan_mesaji uzunluk:', parsed.danisan_mesaji.length)
         return {
           text: parsed.danisan_mesaji,
           meta: {
-            // Yeni genişletilmiş alanlar
             aktifBoyut:       a.aktif_boyut        || null,
             aktifSavunma:     a.aktif_savunma       || null,
             direncSeviyesi:   a.direnc_seviyesi     || null,
@@ -369,25 +377,34 @@ function parseClientResponse(raw) {
             savunmaKalitesi:  a.savunmanin_kalitesi || null,
             terapotikIttifak: a.terapotik_ittifak   || null,
             klinikNot:        a.klinik_not          || null,
-            // Eski UI alanları ile uyumluluk
             resistance: typeof a.duygusal_yogunluk === 'number' ? a.duygusal_yogunluk
                         : typeof a.direnc_skoru    === 'number' ? a.direnc_skoru : null,
-            empathy:    typeof a.empati_skoru === 'number' ? a.empati_skoru : null,
+            empathy: typeof a.empati_skoru === 'number' ? a.empati_skoru : null,
           }
         }
       }
+    } catch (parseErr) {
+      console.error('[KPP] JSON.parse hatasi:', parseErr.message, '| Ham (ilk 300):', raw.slice(0, 300))
+      // JSON parse basarisiz — hata firlat, ekrana ham JSON gosterme
+      throw new Error('Model yaniti gecersiz JSON. Lutfen tekrar gonderin.')
     }
-  } catch (_) { /* JSON parse başarısız → eski format dene */ }
-
-  // 2. Eski META tag formatı (fallback)
-  const metaMatch = raw.match(/\[META\s+direnc=(\d+)\s+empati=(\d+)\]/i)
-  const clean = raw.replace(/\[META[^\]]+\]/gi, '').trim()
-  return {
-    text: clean,
-    meta: metaMatch
-      ? { resistance: parseInt(metaMatch[1]), empathy: parseInt(metaMatch[2]), direncSeviyesi: null, aktarimTuru: null }
-      : null
   }
+
+  // 2. Eski META tag formatı (fallback — eski mesajlar icin)
+  const metaMatch = raw.match(/\[META\s+direnc=(\d+)\s+empati=(\d+)\]/i)
+  const cleanMeta = raw.replace(/\[META[^\]]+\]/gi, '').trim()
+  if (cleanMeta) {
+    return {
+      text: cleanMeta,
+      meta: metaMatch
+        ? { resistance: parseInt(metaMatch[1]), empathy: parseInt(metaMatch[2]), direncSeviyesi: null, aktarimTuru: null }
+        : null
+    }
+  }
+
+  // 3. Hicbir format eslesmediyse hata
+  console.error('[KPP] Hicbir format eslesmedi. Ham yanit:', raw.slice(0, 300))
+  throw new Error('Model beklenen formatta yanit vermedi. Lutfen tekrar gonderin.')
 }
 
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
@@ -652,8 +669,10 @@ function SessionScreen({ profile, messages, isLoading, sessionSecs, onSend, onEn
 
   const visibleMessages = messages.filter(m => !m.isHidden)
   const metas = visibleMessages.filter(m => m.role === 'model' && m.meta).map(m => m.meta)
-  const avgEmpathy = metas.length ? Math.round(metas.reduce((s, m) => s + m.empathy, 0) / metas.length) : null
-  const avgResistance = metas.length ? Math.round(metas.reduce((s, m) => s + m.resistance, 0) / metas.length) : null
+  const empathyVals = metas.map(m => m.empathy).filter(v => typeof v === 'number')
+  const resistanceVals = metas.map(m => m.resistance).filter(v => typeof v === 'number')
+  const avgEmpathy = empathyVals.length ? Math.round(empathyVals.reduce((s, v) => s + v, 0) / empathyVals.length) : null
+  const avgResistance = resistanceVals.length ? Math.round(resistanceVals.reduce((s, v) => s + v, 0) / resistanceVals.length) : null
 
   const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
@@ -962,12 +981,13 @@ export default function App() {
 
     try {
       const systemPrompt = buildSessionSystemPrompt(profile)
-      // Sadece user/assistant mesajları — sistem talimatı callGemini içinde role:system olarak gönderilir
+      // Sadece user/assistant mesajlari — sistem talimati callGemini icinde ayri gonderilir
+      // Model mesajlari icin content (temiz metin) kullan, rawContent (ham JSON) degil
       const apiMsgs = updated
-        .filter(m => !m.isHidden || m.role === 'user')
+        .filter(m => !m.isHidden)
         .map(m => ({
           role: m.role === 'user' ? 'user' : 'model',
-          parts: [{ text: m.rawContent || m.content }]
+          parts: [{ text: m.role === 'model' ? (m.content || m.rawContent) : (m.rawContent || m.content) }]
         }))
       const raw = await callGemini(systemPrompt, apiMsgs)
       const { text: clientText, meta } = parseClientResponse(raw)
