@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai'
 
 // ─── API Config (Google Gemini) ───────────────────────────────────────────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
@@ -278,7 +278,15 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         generationConfig: {
           temperature:     options.temperature  ?? 0.85,
           maxOutputTokens: options.maxTokens    ?? 2048,
-        }
+        },
+        // Psikoterapi simülasyonu eğitim içeriği — varsayılan MEDIUM eşiği yanlış bloklama yapıyor
+        // BLOCK_ONLY_HIGH: yalnızca açık zararlı içeriği engeller, klinik dil geçer
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT,        threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,        threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,  threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,  threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        ]
       })
 
       // Dahili format zaten Gemini uyumlu: role 'user'|'model', parts: [{text}]
@@ -303,7 +311,14 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         throw new Error('İçerik güvenlik filtresi tetiklendi. Lütfen mesajınızı farklı şekilde ifade edin.')
       }
 
-      const text = response.text()
+      let text
+      try {
+        text = response.text()
+      } catch (textErr) {
+        console.error('[KPP] response.text() hatası:', textErr.message)
+        console.error('[KPP] candidate tam:', JSON.stringify(candidate))
+        throw new Error('Model yanıt üretemedi (içerik filtresi veya boş çıktı). Lütfen tekrar deneyin.')
+      }
       console.log('[KPP] Gemini yanıt (ilk 300):', text.slice(0, 300))
       return text
 
