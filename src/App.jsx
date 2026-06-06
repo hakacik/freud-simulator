@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import './App.css'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
-// ─── API Config (Groq) ──────────────────────────────────────────────────
-const OPENROUTER_API_KEY = import.meta.env.VITE_GROQ_API_KEY
-const OPENROUTER_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const MODEL_NAME         = 'llama-3.3-70b-versatile'
+// ─── API Config (Google Gemini) ───────────────────────────────────────────────
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
+const MODEL_NAME     = 'gemini-1.5-pro'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -259,85 +259,66 @@ function parseModelResponse(rawContent) {
   }
 }
 
-// ─── API Caller (OpenRouter) ──────────────────────────────────────────────────
-// Dahili mesaj formatını (role: user/model, parts) OpenAI-uyumlu formata çevirir
-// OpenRouter natively role:system destekler — sistem mesajı ayrı gönderilir
-function toOpenAIMsgs(apiMessages) {
-  return apiMessages
-    .filter(m => m.role === 'user' || m.role === 'model')
-    .map(m => ({
-      role: m.role === 'model' ? 'assistant' : 'user',
-      content: m.parts?.map(p => p.text).join('') ?? m.content ?? ''
-    }))
-}
-
+// ─── API Caller (Google Gemini 1.5 Pro) ───────────────────────────────────────────
+// options.jsonMode = false → responseMimeType eklenmez (süpervizyon raporu için)
 async function callGemini(systemPrompt, apiMessages, options = {}) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('VITE_GROQ_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Groq API anahtari ekleyin.')
+  if (!GEMINI_API_KEY) {
+    throw new Error('VITE_GEMINI_API_KEY .env dosyasinda tanimlanmamis. Lutfen gecerli bir Gemini API anahtari ekleyin.')
   }
-
-  // Sistem promptunu role:"system" olarak en basa ekle (OpenAI formatı)
-  const conversationMsgs = toOpenAIMsgs(apiMessages)
-  const messagesWithSystem = [
-    { role: 'system', content: systemPrompt },
-    ...conversationMsgs
-  ]
 
   const MAX_RETRIES = 3
   let lastError = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-
-    const res = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://freud-simulator.netlify.app',
-        'X-Title': 'Freud Simulator',
-      },
-      body: JSON.stringify({
-        model:       MODEL_NAME,
-        messages:    messagesWithSystem,
-        temperature: options.temperature ?? 0.85,
-        max_tokens:  options.maxTokens   ?? 2048,
+    try {
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+      const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        systemInstruction: systemPrompt,
+        generationConfig: {
+          temperature:     options.temperature  ?? 0.85,
+          maxOutputTokens: options.maxTokens    ?? 2048,
+          ...(options.jsonMode !== false ? { responseMimeType: 'application/json' } : {})
+        }
       })
-    })
 
-    if (res.ok) {
-      const data = await res.json()
-      console.log('[KPP] OpenRouter yanıt:', JSON.stringify(data).slice(0, 600))
+      // Dahili format zaten Gemini uyumlu: role 'user'|'model', parts: [{text}]
+      const contents = apiMessages
+        .filter(m => m.role === 'user' || m.role === 'model')
+        .map(m => ({
+          role:  m.role,
+          parts: m.parts ?? [{ text: m.content ?? '' }]
+        }))
 
-      // OpenAI-uyumlu format: choices[0].message.content
-      const text = data.choices?.[0]?.message?.content ?? null
-
-      if (!text) {
-        console.error('[KPP] Yanıt parse edilemedi. Tam yanıt:', JSON.stringify(data))
-        throw new Error('API boş yanıt döndürdü. Lütfen tekrar deneyin.')
-      }
+      console.log('[KPP] Gemini çağrısı — model:', MODEL_NAME, '| mesaj sayısı:', contents.length)
+      const result = await model.generateContent({ contents })
+      const text = result.response.text()
+      console.log('[KPP] Gemini yanıt (ilk 300):', text.slice(0, 300))
       return text
-    }
 
-    const errData = await res.json().catch(() => ({}))
-    const errMsg  = errData.error?.message || errData.message || `API Hatası: ${res.status}`
+    } catch (err) {
+      const is429 =
+        err.status === 429 ||
+        String(err.message).includes('429') ||
+        String(err.message).includes('RESOURCE_EXHAUSTED')
 
-    // Rate-limit hatası → otomatik yeniden dene
-    if (res.status === 429) {
-      const waitSec = 30
-      if (attempt < MAX_RETRIES) {
-        console.warn(`[KPP] Rate limit — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
-        await new Promise(r => setTimeout(r, waitSec * 1000))
-        continue
+      if (is429) {
+        const waitSec = 30
+        if (attempt < MAX_RETRIES) {
+          console.warn(`[KPP] Rate limit — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
+          await new Promise(r => setTimeout(r, waitSec * 1000))
+          lastError = err
+          continue
+        }
+        lastError = new Error(
+          `⏱️ API Rate Limit Aşıldı\n\nLütfen 1-2 dakika bekleyip tekrar deneyin.\n\n(Model: ${MODEL_NAME})`
+        )
+        break
       }
-      lastError = new Error(
-        `⏱️ API Rate Limit Aşıldı\n\nLütfen 1-2 dakika bekleyip tekrar deneyin.\n\n(Model: ${MODEL_NAME})`
-      )
+
+      lastError = err
       break
     }
-
-    // Diğer hatalar
-    lastError = new Error(errMsg)
-    break
   }
 
   throw lastError ?? new Error('Bilinmeyen bir API hatasi olustu. Lutfen tekrar deneyin.')
@@ -1005,7 +986,7 @@ export default function App() {
       const rpt = await callGemini(
         supervisorPrompt,
         [{ role: 'user', parts: [{ text: 'Lütfen seans süpervizyon raporunu hazırla.' }] }],
-        { temperature: 0.55, maxTokens: 2500 }
+        { temperature: 0.55, maxTokens: 2500, jsonMode: false }
       )
       setReport(rpt)
       setPhase('report')
