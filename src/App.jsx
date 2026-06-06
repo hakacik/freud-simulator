@@ -291,7 +291,19 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 
       console.log('[KPP] Gemini çağrısı — model:', MODEL_NAME, '| mesaj sayısı:', contents.length)
       const result = await model.generateContent({ contents })
-      const text = result.response.text()
+      const response = result.response
+
+      // Boş veya engellenen yanıt kontrolü
+      const candidate = response.candidates?.[0]
+      if (!candidate) {
+        throw new Error('Gemini boş yanıt döndürdü. Lütfen tekrar deneyin.')
+      }
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'RECITATION') {
+        console.warn('[KPP] Gemini içerik filtresi:', candidate.finishReason, candidate.safetyRatings)
+        throw new Error('İçerik güvenlik filtresi tetiklendi. Lütfen mesajınızı farklı şekilde ifade edin.')
+      }
+
+      const text = response.text()
       console.log('[KPP] Gemini yanıt (ilk 300):', text.slice(0, 300))
       return text
 
@@ -922,7 +934,7 @@ export default function App() {
       // Hidden trigger → client opening message
       // Açılış mesajı: JSON formatında ama danisan_mesaji kısa (max 2-3 cümle)
       const triggerMsg = { role: 'user', parts: [{ text: '[SEANS BAŞLADI. Terapist odaya girdi. JSON formatında yanıt ver; danisan_mesaji alanını maksimum 2-3 kısa cümle ile doldur.]' }] }
-      const raw = await callGemini(systemPrompt, [triggerMsg], { temperature: 0.8, maxTokens: 600 })
+      const raw = await callGemini(systemPrompt, [triggerMsg], { temperature: 0.8, maxTokens: 1200 })
       const { text, meta } = parseClientResponse(raw)
       setMessages([
         { role: 'user', content: '', rawContent: triggerMsg.parts[0].text, isHidden: true },
@@ -956,14 +968,15 @@ export default function App() {
 
     try {
       const systemPrompt = buildSessionSystemPrompt(profile)
-      // Sadece user/assistant mesajlari — sistem talimati callGemini icinde ayri gonderilir
-      // Model mesajlari icin content (temiz metin) kullan, rawContent (ham JSON) degil
+      // Gemini için contents dizisi user mesajıyla başlamalı.
+      // isHidden mesajlar UI'da gizlenir ama API context'ine dahil edilir —
+      // aksi hâlde contents[0].role='model' olur ve Gemini hata verir.
       const apiMsgs = updated
-        .filter(m => !m.isHidden)
         .map(m => ({
           role: m.role === 'user' ? 'user' : 'model',
           parts: [{ text: m.role === 'model' ? (m.content || m.rawContent) : (m.rawContent || m.content) }]
         }))
+        .filter(m => m.parts[0].text)  // boş part'ları at
       const raw = await callGemini(systemPrompt, apiMsgs)
       const { text: clientText, meta } = parseClientResponse(raw)
       setMessages(prev => [...prev, { role: 'model', content: clientText, rawContent: raw, meta }])
