@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 // ─── API Config (Google Gemini) ───────────────────────────────────────────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL_NAME     = 'gemini-1.5-pro-latest'
+const MODEL_NAME     = 'gemini-1.5-flash'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
