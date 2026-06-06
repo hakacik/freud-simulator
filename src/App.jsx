@@ -4,7 +4,7 @@ import './App.css'
 // ─── API Config (OpenRouter) ─────────────────────────────────────────────────
 const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL_NAME         = 'google/gemini-2.0-flash-exp:free'
+const MODEL_NAME         = 'meta-llama/llama-3.1-8b-instruct:free'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
