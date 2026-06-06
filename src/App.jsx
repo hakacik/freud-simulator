@@ -4,7 +4,7 @@ import './App.css'
 // ─── API Config (OpenRouter) ─────────────────────────────────────────────────
 const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL_NAME         = 'meta-llama/llama-3.3-70b-instruct:free'
+const MODEL_NAME         = 'google/gemini-2.0-flash-exp:free'
 
 // ─── System Prompts ───────────────────────────────────────────────────────────
 
@@ -258,7 +258,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
     ...conversationMsgs
   ]
 
-  const MAX_RETRIES = 2
+  const MAX_RETRIES = 3
   let lastError = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -298,7 +298,7 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
 
     // Rate-limit hatası → otomatik yeniden dene
     if (res.status === 429) {
-      const waitSec = 15
+      const waitSec = 30
       if (attempt < MAX_RETRIES) {
         console.warn(`[KPP] Rate limit — ${waitSec}s bekleniyor (deneme ${attempt + 1}/${MAX_RETRIES})`)
         await new Promise(r => setTimeout(r, waitSec * 1000))
