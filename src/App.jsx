@@ -51,7 +51,7 @@ ONEMLI ZORUNLU KURALLAR:
 
 function buildSessionSystemPrompt(profile) {
   const jsonOrnek = '{\n'
-    + '  "danisan_mesaji": "Danisanin seansa katkisi. Birinci sahis, ham ve tutarsizliklar icerebilir. 40-200 kelime arasi.",\n'
+    + '  "danisan_mesaji": "Danisanin seansa dogal katkisi. Birinci sahis, tutarsizliklar icerebilir. 20-80 kelime arasi, gercekci ve kisa.",\n'
     + '  "analiz_paneli": {\n'
     + '    "aktif_boyut": "cocukluk_travmasi | varoluşsal_kaygı | borderline_narsisistik | yas | obsesif",\n'
     + '    "aktif_savunma": "Inkar | Yansitma | Entelektüellestirme | Bölünme | Somatizasyon | Bastirma | Yüceltme | Mizah | Disavurum",\n'
@@ -926,8 +926,9 @@ export default function App() {
     try {
       const systemPrompt = buildSessionSystemPrompt(profile)
       // Hidden trigger → client opening message
-      const triggerMsg = { role: 'user', parts: [{ text: '[SEANS BAŞLADI. Terapist odaya girdi ve sizi karşıladı. İlk kez terapiye gelen biri olarak kısa, doğal bir açılış yap — maksimum 2-3 cümle.]' }] }
-      const raw = await callGemini(systemPrompt, [triggerMsg], { temperature: 0.8 })
+      // Açılış mesajı: JSON formatında ama danisan_mesaji kısa (max 2-3 cümle)
+      const triggerMsg = { role: 'user', parts: [{ text: '[SEANS BAŞLADI. Terapist odaya girdi. JSON formatında yanıt ver; danisan_mesaji alanını maksimum 2-3 kısa cümle ile doldur.]' }] }
+      const raw = await callGemini(systemPrompt, [triggerMsg], { temperature: 0.8, maxTokens: 600 })
       const { text, meta } = parseClientResponse(raw)
       setMessages([
         { role: 'user', content: '', rawContent: triggerMsg.parts[0].text, isHidden: true },
