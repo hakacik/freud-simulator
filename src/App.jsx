@@ -278,7 +278,6 @@ async function callGemini(systemPrompt, apiMessages, options = {}) {
         generationConfig: {
           temperature:     options.temperature  ?? 0.85,
           maxOutputTokens: options.maxTokens    ?? 2048,
-          ...(options.jsonMode !== false ? { responseMimeType: 'application/json' } : {})
         }
       })
 
